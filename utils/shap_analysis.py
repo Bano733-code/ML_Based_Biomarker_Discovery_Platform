@@ -3,6 +3,7 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 
+from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 
@@ -18,101 +19,173 @@ def calculate_shap_values(model, X):
     Supports:
     - Random Forest
     - Logistic Regression
+    - Logistic Regression inside Pipeline
+    - Random Forest inside Pipeline
     - SHAP old API
     - SHAP new API
     """
-   
-    if hasattr(model, "steps"):
 
-        final_model = model.steps[-1][1]
+    # =================================================
+    # PIPELINE
+    # =================================================
+
+    if isinstance(model, Pipeline):
 
         # ---------------------------------------------
-        # Pipeline + Logistic Regression
+        # Get final classifier
         # ---------------------------------------------
 
-        if isinstance(final_model, LogisticRegression):
+        final_model = model.named_steps[
+            "classifier"
+        ]
 
-            # Transform X using all preprocessing steps
-            preprocessing = model[:-1]
+        # ---------------------------------------------
+        # Get preprocessing steps
+        # ---------------------------------------------
 
-            X_transformed = preprocessing.transform(X)
+        preprocessing = model[:-1]
 
-            # Convert transformed data to DataFrame
-            # while keeping original gene names
-            X_transformed = pd.DataFrame(
-                X_transformed,
-                columns=X.columns,
-                index=X.index
-            )
+        # Apply preprocessing to X
+        X_transformed = preprocessing.transform(X)
+
+        # Convert transformed data back to DataFrame
+        # while keeping original gene names
+        X_transformed = pd.DataFrame(
+            X_transformed,
+            columns=X.columns,
+            index=X.index
+        )
+
+        # =============================================
+        # PIPELINE + LOGISTIC REGRESSION
+        # =============================================
+
+        if isinstance(
+            final_model,
+            LogisticRegression
+        ):
 
             explainer = shap.LinearExplainer(
                 final_model,
                 X_transformed
             )
 
-            shap_values = explainer(X_transformed)
+            try:
+
+                # New SHAP API
+                shap_values = explainer(
+                    X_transformed
+                )
+
+            except Exception:
+
+                # Old SHAP API
+                shap_values = explainer.shap_values(
+                    X_transformed
+                )
 
             return shap_values, explainer
 
-        # ---------------------------------------------
-        # Pipeline + Random Forest
-        # ---------------------------------------------
+        # =============================================
+        # PIPELINE + RANDOM FOREST
+        # =============================================
 
-        elif isinstance(final_model, RandomForestClassifier):
-
-            preprocessing = model[:-1]
-
-            X_transformed = preprocessing.transform(X)
-
-            X_transformed = pd.DataFrame(
-                X_transformed,
-                columns=X.columns,
-                index=X.index
-            )
+        elif isinstance(
+            final_model,
+            RandomForestClassifier
+        ):
 
             explainer = shap.TreeExplainer(
                 final_model
             )
 
-            shap_values = explainer(X_transformed)
+            try:
+
+                # New SHAP API
+                shap_values = explainer(
+                    X_transformed
+                )
+
+            except Exception:
+
+                # Old SHAP API
+                shap_values = explainer.shap_values(
+                    X_transformed
+                )
 
             return shap_values, explainer
+
+        # =============================================
+        # UNKNOWN PIPELINE MODEL
+        # =============================================
 
         else:
 
             raise ValueError(
-                f"Unsupported pipeline final model: "
+                "Unsupported pipeline classifier: "
                 f"{type(final_model)}"
             )
 
-    elif isinstance(model, RandomForestClassifier):
+    # =================================================
+    # DIRECT RANDOM FOREST
+    # =================================================
 
-        explainer = shap.TreeExplainer(model)
+    elif isinstance(
+        model,
+        RandomForestClassifier
+    ):
 
-    elif isinstance(model, LogisticRegression):
+        explainer = shap.TreeExplainer(
+            model
+        )
+
+        try:
+
+            # New SHAP API
+            shap_values = explainer(X)
+
+        except Exception:
+
+            # Old SHAP API
+            shap_values = explainer.shap_values(X)
+
+        return shap_values, explainer
+
+    # =================================================
+    # DIRECT LOGISTIC REGRESSION
+    # =================================================
+
+    elif isinstance(
+        model,
+        LogisticRegression
+    ):
 
         explainer = shap.LinearExplainer(
             model,
             X
         )
 
+        try:
+
+            # New SHAP API
+            shap_values = explainer(X)
+
+        except Exception:
+
+            # Old SHAP API
+            shap_values = explainer.shap_values(X)
+
+        return shap_values, explainer
+
+    # =================================================
+    # UNSUPPORTED MODEL
+    # =================================================
+
     else:
 
         raise ValueError(
             f"Unsupported model type: {type(model)}"
         )
-
-    try:
-
-        # New SHAP API
-        shap_values = explainer(X)
-
-    except Exception:
-
-        # Older SHAP API
-        shap_values = explainer.shap_values(X)
-
-    return shap_values, explainer
 
 
 # =====================================================
@@ -121,16 +194,19 @@ def calculate_shap_values(model, X):
 
 def extract_values(shap_values):
     """
-    Convert every SHAP output format into
+    Convert different SHAP output formats into
     a (samples × features) NumPy array.
     """
 
     # ------------------------------------
-    # OLD SHAP
-    # list(class0,class1)
+    # OLD SHAP API
+    # list(class0, class1)
     # ------------------------------------
 
-    if isinstance(shap_values, list):
+    if isinstance(
+        shap_values,
+        list
+    ):
 
         if len(shap_values) == 2:
 
@@ -144,19 +220,24 @@ def extract_values(shap_values):
     # NEW SHAP Explanation object
     # ------------------------------------
 
-    elif hasattr(shap_values, "values"):
+    elif hasattr(
+        shap_values,
+        "values"
+    ):
 
         values = shap_values.values
 
     # ------------------------------------
-    # Already ndarray
+    # Already NumPy array
     # ------------------------------------
 
     else:
 
         values = shap_values
 
-    values = np.asarray(values)
+    values = np.asarray(
+        values
+    )
 
     # ------------------------------------
     # Shape handling
@@ -166,13 +247,20 @@ def extract_values(shap_values):
 
     if values.ndim == 3:
 
+        # Binary classification
+        # Select positive class
         values = values[:, :, 1]
 
-    # (features,)
+    # ------------------------------------
+    # Single sample
+    # ------------------------------------
 
     elif values.ndim == 1:
 
-        values = values.reshape(1, -1)
+        values = values.reshape(
+            1,
+            -1
+        )
 
     return values
 
@@ -196,27 +284,23 @@ def get_feature_importance(
 
     importance = np.abs(
         values
-    ).mean(axis=0)
+    ).mean(
+        axis=0
+    )
 
     importance_df = pd.DataFrame(
-
         {
-
             "Gene": X.columns,
-
             "SHAP Importance": importance
-
         }
-
     )
 
     importance_df = importance_df.sort_values(
-
         by="SHAP Importance",
-
         ascending=False
-
-    ).reset_index(drop=True)
+    ).reset_index(
+        drop=True
+    )
 
     return importance_df
 
@@ -237,20 +321,18 @@ def shap_summary_plot(
         shap_values
     )
 
-    plt.close("all")
+    plt.close(
+        "all"
+    )
 
     fig = plt.figure(
         figsize=(10, 6)
     )
 
     shap.summary_plot(
-
         values,
-
         X,
-
         show=False
-
     )
 
     plt.tight_layout()
@@ -274,22 +356,19 @@ def shap_bar_plot(
         shap_values
     )
 
-    plt.close("all")
+    plt.close(
+        "all"
+    )
 
     fig = plt.figure(
         figsize=(10, 6)
     )
 
     shap.summary_plot(
-
         values,
-
         X,
-
         plot_type="bar",
-
         show=False
-
     )
 
     plt.tight_layout()
@@ -316,21 +395,14 @@ def explain_single_sample(
     )
 
     return pd.DataFrame(
-
         {
-
             "Gene": X.columns,
-
             "SHAP Value": values[sample_index]
-
         }
-
     ).sort_values(
-
         by="SHAP Value",
-
         key=np.abs,
-
         ascending=False
-
-    ).reset_index(drop=True)
+    ).reset_index(
+        drop=True
+    )
