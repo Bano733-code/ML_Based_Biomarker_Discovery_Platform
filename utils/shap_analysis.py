@@ -21,18 +21,68 @@ def calculate_shap_values(model, X):
     - SHAP old API
     - SHAP new API
     """
+   
     if hasattr(model, "steps"):
 
-        try:
-            # SHAP explains the complete pipeline
-            explainer = shap.Explainer(model, X)
-            shap_values = explainer(X)
+        final_model = model.steps[-1][1]
+
+        # ---------------------------------------------
+        # Pipeline + Logistic Regression
+        # ---------------------------------------------
+
+        if isinstance(final_model, LogisticRegression):
+
+            # Transform X using all preprocessing steps
+            preprocessing = model[:-1]
+
+            X_transformed = preprocessing.transform(X)
+
+            # Convert transformed data to DataFrame
+            # while keeping original gene names
+            X_transformed = pd.DataFrame(
+                X_transformed,
+                columns=X.columns,
+                index=X.index
+            )
+
+            explainer = shap.LinearExplainer(
+                final_model,
+                X_transformed
+            )
+
+            shap_values = explainer(X_transformed)
 
             return shap_values, explainer
 
-        except Exception as e:
+        # ---------------------------------------------
+        # Pipeline + Random Forest
+        # ---------------------------------------------
+
+        elif isinstance(final_model, RandomForestClassifier):
+
+            preprocessing = model[:-1]
+
+            X_transformed = preprocessing.transform(X)
+
+            X_transformed = pd.DataFrame(
+                X_transformed,
+                columns=X.columns,
+                index=X.index
+            )
+
+            explainer = shap.TreeExplainer(
+                final_model
+            )
+
+            shap_values = explainer(X_transformed)
+
+            return shap_values, explainer
+
+        else:
+
             raise ValueError(
-                f"Could not calculate SHAP values for pipeline: {e}"
+                f"Unsupported pipeline final model: "
+                f"{type(final_model)}"
             )
 
     elif isinstance(model, RandomForestClassifier):
