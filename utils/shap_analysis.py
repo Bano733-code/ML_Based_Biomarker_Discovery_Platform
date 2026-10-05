@@ -21,8 +21,21 @@ def calculate_shap_values(model, X):
     - SHAP old API
     - SHAP new API
     """
+    if hasattr(model, "steps"):
 
-    if isinstance(model, RandomForestClassifier):
+        try:
+            # SHAP explains the complete pipeline
+            explainer = shap.Explainer(model, X)
+            shap_values = explainer(X)
+
+            return shap_values, explainer
+
+        except Exception as e:
+            raise ValueError(
+                f"Could not calculate SHAP values for pipeline: {e}"
+            )
+
+    elif isinstance(model, RandomForestClassifier):
 
         explainer = shap.TreeExplainer(model)
 
